@@ -1,0 +1,22 @@
+{
+    "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/main/.schema/devbox.schema.json",
+    "packages": [
+        "bun@latest",
+        "git@latest",
+        "jq@latest"
+    ],
+    "shell": {
+        "init_hook": [
+            "echo 'obsidian-local-git dev environment ready'",
+            "echo \"Bun: $(bun --version)\"",
+            "echo \"Git: $(git --version)\""
+        ],
+        "scripts": {
+            "dev": "cd plugin && bun run dev",
+            "build": "cd plugin && bun run build",
+            "lint": "cd plugin && bun run lint",
+            "format": "bun run format",
+            "test": "cd plugin && bun run test"
+        }
+    }
+}

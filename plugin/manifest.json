@@ -1,0 +1,10 @@
+{
+    "id": "local-git",
+    "name": "Local Git Backup",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Automatic local git versioning without remote sync",
+    "author": "Stanley Sori che",
+    "authorUrl": "https://github.com/ssoriche",
+    "isDesktopOnly": true
+}
