@@ -4,7 +4,7 @@ Automatic backup git versioning for Obsidian without remote sync.
 
 ## Features
 
-- **Local Git Versioning**: Automatically commit changes to a backup git repository
+- **Backup Git Versioning**: Automatically commit changes to a backup git repository
 - **Multiple Commit Triggers**:
   - Interval-based commits (e.g., every 5 minutes)
   - Idle-based commits (after X minutes of no edits)

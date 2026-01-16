@@ -347,7 +347,7 @@ brew install git
 
 2. Enable debug logging to see timer activity:
    - Settings → Backup Git → Advanced → Debug logging
-   - Check console for "[Local Git]" messages
+   - Check console for "[Backup Git]" messages
 
 3. Verify there are uncommitted changes:
    ```bash
