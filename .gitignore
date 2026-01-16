@@ -1,0 +1,9 @@
+node_modules/
+plugin/build/
+.DS_Store
+*.log
+*.map
+.env
+.vscode/
+.idea/
+.beads/

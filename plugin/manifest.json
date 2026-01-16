@@ -1,0 +1,10 @@
+{
+    "id": "backup-git",
+    "name": "Backup Git",
+    "version": "0.0.1",
+    "minAppVersion": "0.15.0",
+    "description": "Automatic backup git versioning without remote sync",
+    "author": "Shawn Sorichetti",
+    "authorUrl": "https://github.com/ssoriche",
+    "isDesktopOnly": true
+}

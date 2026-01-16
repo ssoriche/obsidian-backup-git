@@ -1,0 +1,38 @@
+{
+    "name": "obsidian-backup-git",
+    "version": "0.0.1",
+    "description": "Backup git versioning for Obsidian",
+    "main": "plugin/build/main.js",
+    "scripts": {
+        "dev": "cd plugin && node esbuild.config.mjs",
+        "build": "cd plugin && tsc --noEmit && node esbuild.config.mjs production",
+        "lint": "cd plugin && eslint src/",
+        "lint:fix": "cd plugin && eslint src/ --fix",
+        "format": "prettier --write 'plugin/src/**/*.ts'",
+        "format:check": "prettier --check 'plugin/src/**/*.ts'",
+        "typecheck": "cd plugin && tsc --noEmit",
+        "test": "cd plugin && vitest run",
+        "test:watch": "cd plugin && vitest"
+    },
+    "keywords": ["obsidian", "plugin", "git", "backup", "version-control"],
+    "author": "Shawn Sorichetti",
+    "license": "MIT",
+    "dependencies": {
+        "simple-git": "^3.22.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.17.0",
+        "@types/node": "^20.11.5",
+        "@typescript-eslint/eslint-plugin": "^8.18.2",
+        "@typescript-eslint/parser": "^8.18.2",
+        "builtin-modules": "^4.0.0",
+        "esbuild": "^0.19.11",
+        "eslint": "^9.17.0",
+        "eslint-config-prettier": "^9.1.0",
+        "obsidian": "latest",
+        "prettier": "^3.2.4",
+        "typescript": "^5.3.3",
+        "typescript-eslint": "^8.18.2",
+        "vitest": "^1.2.0"
+    }
+}
