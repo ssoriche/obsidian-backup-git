@@ -173,6 +173,54 @@ export class GitEngine {
         }
     }
 
+    async stageAndCommitFiles(files: string[], message: string): Promise<void> {
+        try {
+            this.updateStatus({ state: 'committing' });
+
+            // Stage specific files
+            if (files.length > 0) {
+                await this.git.add(files);
+            }
+
+            // Commit
+            await this.git.commit(message);
+
+            // Update status with commit info
+            this.updateStatus({
+                state: 'idle',
+                lastCommitTime: Date.now(),
+                lastCommitMessage: message,
+            });
+        } catch (error) {
+            this.updateStatus({ state: 'error' });
+            this.handleError(error as Error);
+            throw error;
+        }
+    }
+
+    async isFileIgnored(filePath: string): Promise<boolean> {
+        try {
+            const result = await this.git.raw(['check-ignore', filePath]);
+            return result.trim() !== '';
+        } catch {
+            // If git check-ignore exits with non-zero, file is not ignored
+            return false;
+        }
+    }
+
+    async filterIgnoredFiles(files: FileDiffStat[]): Promise<FileDiffStat[]> {
+        const filtered: FileDiffStat[] = [];
+
+        for (const file of files) {
+            const isIgnored = await this.isFileIgnored(file.path);
+            if (!isIgnored) {
+                filtered.push(file);
+            }
+        }
+
+        return filtered;
+    }
+
     async getLastCommitInfo(): Promise<CommitInfo | null> {
         try {
             const log: LogResult = await this.git.log({ maxCount: 1 });
