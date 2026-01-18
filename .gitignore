@@ -7,3 +7,6 @@ plugin/build/
 .vscode/
 .idea/
 .beads/
+
+# Bun
+# Note: bun.lock/bun.lockb should be committed to ensure reproducible builds

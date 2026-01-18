@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /plugin
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      typescript-eslint:
+        patterns:
+          - "@typescript-eslint/*"
+          - "typescript-eslint"
+      testing:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
