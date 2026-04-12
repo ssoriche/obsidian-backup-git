@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 .PHONY: help install dev build test lint format typecheck clean release tag-release
 
 # Default target
@@ -29,35 +31,35 @@ help:
 # Install dependencies
 install:
 	@echo "Installing dependencies..."
-	@npm install
+	@bun install
 	@echo "Dependencies installed!"
 
 # Development
 dev:
 	@echo "Building plugin in watch mode..."
-	@npm run dev
+	@bun run dev
 
 # Build
 build:
 	@echo "Building plugin..."
-	@npm run build
+	@bun run build
 
 # Quality checks
 test:
 	@echo "Running tests..."
-	@npm run test
+	@bun run test
 
 lint:
 	@echo "Running linter..."
-	@npm run lint
+	@bun run lint
 
 format:
 	@echo "Formatting code..."
-	@npm run format
+	@bun run format
 
 typecheck:
 	@echo "Type checking..."
-	@npm run typecheck
+	@bun run typecheck
 
 # Cleanup
 clean:
@@ -74,19 +76,29 @@ release:
 		echo "Error: VERSION is required. Usage: make release VERSION=x.y.z"; \
 		exit 1; \
 	fi
+	@if ! echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$$'; then \
+		echo "Error: VERSION '$(VERSION)' is not a valid semver string (e.g., 1.2.3 or 1.2.3-rc.1)"; \
+		exit 1; \
+	fi
 	@echo "Creating release branch for version $(VERSION)..."
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Error: Working directory is not clean. Commit or stash changes first."; \
 		exit 1; \
 	fi
+	@CURRENT_BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$CURRENT_BRANCH" != "main" ]; then \
+		echo "Error: Must be on main branch to release. Currently on $$CURRENT_BRANCH"; \
+		echo "Run: git checkout main && git pull"; \
+		exit 1; \
+	fi
+	@git pull --ff-only origin main
 	@git checkout -b "release/v$(VERSION)"
-	@echo "Updating plugin manifest to version $(VERSION)..."
-	@sed -i.bak 's/"version": "[^"]*"/"version": "$(VERSION)"/' plugin/manifest.json && rm plugin/manifest.json.bak
-	@git add plugin/manifest.json
+	@bun pm version "$(VERSION)" --no-git-tag-version
+	@git add package.json
 	@git commit -m "chore: bump version to $(VERSION)"
 	@git push -u origin "release/v$(VERSION)"
-	@echo "Creating pull request..."
-	@gh pr create --title "chore: bump version to $(VERSION)" --body "## Summary\n\n- Update plugin manifest version to $(VERSION)\n- Prepare for release v$(VERSION)\n\nAfter merging, create the release tag with: make tag-release VERSION=$(VERSION)"
+	@printf '## Summary\n\n- Bump version to $(VERSION)\n\nAfter merging, run:\n\n    make tag-release VERSION=$(VERSION)\n' \
+		| gh pr create --title "chore: bump version to $(VERSION)" --body-file -
 	@echo ""
 	@echo "Version bump PR created! After it's merged, run:"
 	@echo "  make tag-release VERSION=$(VERSION)"
@@ -97,10 +109,41 @@ tag-release:
 		echo "Error: VERSION is required. Usage: make tag-release VERSION=x.y.z"; \
 		exit 1; \
 	fi
-	@CURRENT_BRANCH=$$(git branch --show-current); \
+	@if ! echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$$'; then \
+		echo "Error: VERSION '$(VERSION)' is not a valid semver string (e.g., 1.2.3 or 1.2.3-rc.1)"; \
+		exit 1; \
+	fi
+	@CURRENT_BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
 	if [ "$$CURRENT_BRANCH" != "main" ]; then \
 		echo "Error: Must be on main branch to tag. Currently on $$CURRENT_BRANCH"; \
 		echo "Run: git checkout main && git pull"; \
+		exit 1; \
+	fi
+	@git fetch origin main
+	@LOCAL=$$(git rev-parse --verify main); \
+	REMOTE=$$(git rev-parse --verify origin/main); \
+	if [ "$$LOCAL" != "$$REMOTE" ]; then \
+		echo "Error: Local main is out of sync with origin/main. Run: git pull"; \
+		exit 1; \
+	fi
+	@PKG_VERSION=$$(jq -r '.version' package.json); \
+	if [ "$$PKG_VERSION" != "$(VERSION)" ]; then \
+		echo "Error: package.json version ($$PKG_VERSION) does not match VERSION=$(VERSION)."; \
+		echo "Did you merge and pull the version bump PR first?"; \
+		exit 1; \
+	fi
+	@MANIFEST_VERSION=$$(jq -r '.version' plugin/manifest.json); \
+	if [ "$$MANIFEST_VERSION" != "$(VERSION)" ]; then \
+		echo "Error: plugin/manifest.json version ($$MANIFEST_VERSION) does not match VERSION=$(VERSION)."; \
+		echo "Did version-bump.mjs run correctly?"; \
+		exit 1; \
+	fi
+	@if git tag -l "v$(VERSION)" | grep -q .; then \
+		echo "Error: Local tag v$(VERSION) already exists. Run: git tag -d v$(VERSION)"; \
+		exit 1; \
+	fi
+	@if git ls-remote --tags origin "refs/tags/v$(VERSION)" | grep -q .; then \
+		echo "Error: Tag v$(VERSION) already exists on origin."; \
 		exit 1; \
 	fi
 	@echo "Creating and pushing tag v$(VERSION)..."

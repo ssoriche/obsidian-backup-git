@@ -5,19 +5,19 @@ on:
     tags:
       - 'v*'
 
+env:
+  BUN_VERSION: '1.2'
+
 jobs:
   build-plugin:
     name: Build Plugin
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: plugin
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -26,7 +26,7 @@ jobs:
         run: bun run build
 
       - name: Upload plugin artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: plugin-build
           path: |
@@ -40,22 +40,56 @@ jobs:
     needs: [build-plugin]
     permissions:
       contents: write
+    concurrency:
+      group: create-release-${{ github.ref_name }}
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Download plugin artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: plugin-build
           path: plugin-release
 
-      - name: Create Release
+      - name: Extract release notes from CHANGELOG.md
+        id: changelog
+        run: |
+          if [ ! -f CHANGELOG.md ]; then
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            awk -v ver="$version" \
+              'index($0, "## [" ver "]") == 1 {found=1; next} found && /^## \[/{exit} found' \
+              CHANGELOG.md > release-notes.md
+            if [ -s release-notes.md ]; then
+              echo "has_notes=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "has_notes=false" >> "$GITHUB_OUTPUT"
+              rm -f release-notes.md
+            fi
+          fi
+
+      - name: Create release (with CHANGELOG notes)
+        if: steps.changelog.outputs.has_notes == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            plugin-release/plugin/build/main.js
+            plugin-release/plugin/build/manifest.json
+            plugin-release/plugin/build/styles.css
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release (auto-generated notes)
+        if: steps.changelog.outputs.has_notes != 'true'
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            plugin-release/main.js
-            plugin-release/manifest.json
-            plugin-release/styles.css
+            plugin-release/plugin/build/main.js
+            plugin-release/plugin/build/manifest.json
+            plugin-release/plugin/build/styles.css
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
