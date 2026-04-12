@@ -4,15 +4,16 @@
     "description": "Backup git versioning for Obsidian",
     "main": "plugin/build/main.js",
     "scripts": {
-        "dev": "cd plugin && node esbuild.config.mjs",
-        "build": "cd plugin && tsc --noEmit && node esbuild.config.mjs production",
+        "dev": "cd plugin && bun esbuild.config.mjs",
+        "build": "cd plugin && tsc --noEmit && bun esbuild.config.mjs production",
         "lint": "cd plugin && eslint src/",
         "lint:fix": "cd plugin && eslint src/ --fix",
         "format": "prettier --write 'plugin/src/**/*.ts'",
         "format:check": "prettier --check 'plugin/src/**/*.ts'",
         "typecheck": "cd plugin && tsc --noEmit",
         "test": "cd plugin && vitest run",
-        "test:watch": "cd plugin && vitest"
+        "test:watch": "cd plugin && vitest",
+        "version": "bun version-bump.mjs && git add plugin/manifest.json plugin/versions.json"
     },
     "keywords": ["obsidian", "plugin", "git", "backup", "version-control"],
     "author": "Shawn Sorichetti",
