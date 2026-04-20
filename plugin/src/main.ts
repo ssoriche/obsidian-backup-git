@@ -2,7 +2,12 @@ import { Plugin, Notice, PluginSettingTab, Setting, TFile } from 'obsidian';
 import type { App } from 'obsidian';
 import { GitEngine } from './git-engine';
 import type { GitStatus } from './git-engine';
-import { buildCommitMessage } from './commit-builder';
+import {
+    buildCommitMessage,
+    categorizeFiles,
+    buildSingleFileCommitMessage,
+    buildHiddenFilesCommitMessage,
+} from './commit-builder';
 import type { FileDiffStat } from './commit-builder';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -16,6 +21,10 @@ interface LocalGitSettings {
 
     // Commit message configuration
     maxFilesInCommitMessage: number;
+
+    // Commit strategy
+    commitMode: 'batch' | 'individual';
+    hiddenFilesHandling: 'group' | 'separate' | 'never' | 'gitignore-only';
 
     // UI toggles
     showRibbonIcon: boolean;
@@ -32,6 +41,8 @@ const DEFAULT_SETTINGS: LocalGitSettings = {
     enableIdleCommit: false,
     idleMinutes: 10,
     maxFilesInCommitMessage: 5,
+    commitMode: 'batch',
+    hiddenFilesHandling: 'group',
     showRibbonIcon: true,
     showStatusBar: true,
     additionalGitignorePatterns: '',
@@ -78,6 +89,9 @@ export default class LocalGitPlugin extends Plugin {
 
         // Initialize git repository
         await this.initializeGit();
+
+        // Sync gitignore patterns on startup
+        await this.syncGitignorePatterns();
 
         // Register vault events
         this.registerEvent(
@@ -154,6 +168,9 @@ export default class LocalGitPlugin extends Plugin {
     async saveSettings(): Promise<void> {
         await this.saveData(this.settings);
 
+        // Sync gitignore patterns
+        await this.syncGitignorePatterns();
+
         // Restart timers with new settings
         this.startTimers();
 
@@ -227,6 +244,91 @@ export default class LocalGitPlugin extends Plugin {
         }, 2000);
     }
 
+    private async syncGitignorePatterns(): Promise<void> {
+        if (!this.settings.additionalGitignorePatterns.trim()) {
+            return; // Nothing to sync
+        }
+
+        const vaultPath = (this.app.vault.adapter as unknown as { basePath: string }).basePath;
+        const gitignorePath = path.join(vaultPath, '.gitignore');
+
+        try {
+            let existingContent = '';
+            try {
+                existingContent = await fs.readFile(gitignorePath, 'utf-8');
+            } catch {
+                // File doesn't exist, will create it
+                if (this.settings.debugLogging) {
+                    console.log('[Local Git] .gitignore does not exist, will create');
+                }
+            }
+
+            // Check if our section already exists
+            const sectionMarker = '# Obsidian Backup Git - Additional Patterns';
+            const endMarker = '# End Obsidian Backup Git Patterns';
+
+            const hasSection = existingContent.includes(sectionMarker);
+
+            const patterns = this.settings.additionalGitignorePatterns
+                .split('\n')
+                .map((p) => p.trim())
+                .filter((p) => p && !p.startsWith('#'));
+
+            if (patterns.length === 0) {
+                // Remove section if patterns are empty
+                if (hasSection) {
+                    const regex = new RegExp(`${sectionMarker}[\\s\\S]*?${endMarker}\\n?`, 'g');
+                    const updated = existingContent.replace(regex, '');
+                    await fs.writeFile(gitignorePath, updated);
+                }
+                return;
+            }
+
+            const newSection = [sectionMarker, ...patterns, endMarker, ''].join('\n');
+
+            let updatedContent: string;
+            if (hasSection) {
+                // Replace existing section
+                const regex = new RegExp(`${sectionMarker}[\\s\\S]*?${endMarker}`, 'g');
+                updatedContent = existingContent.replace(regex, newSection.trim());
+            } else {
+                // Append new section
+                const separator = existingContent.endsWith('\n') ? '' : '\n';
+                updatedContent = existingContent + separator + newSection;
+            }
+
+            await fs.writeFile(gitignorePath, updatedContent);
+
+            if (this.settings.debugLogging) {
+                console.log('[Local Git] Updated .gitignore with additional patterns');
+            }
+        } catch (error) {
+            console.error('[Local Git] Failed to update .gitignore:', error);
+            new Notice(`Failed to update .gitignore: ${(error as Error).message}`);
+        }
+    }
+
+    private async filterFilesBySettings(stats: FileDiffStat[]): Promise<FileDiffStat[]> {
+        if (!this.gitEngine) return stats;
+
+        // Handle "gitignore-only" mode
+        if (this.settings.hiddenFilesHandling === 'gitignore-only') {
+            return await this.gitEngine.filterIgnoredFiles(stats);
+        }
+
+        // Handle "never" mode - filter out hidden files
+        if (this.settings.hiddenFilesHandling === 'never') {
+            return stats.filter((stat) => {
+                // Check if any part of the path is hidden (starts with .)
+                const pathParts = stat.path.split('/');
+                const isHidden = pathParts.some((part) => part.startsWith('.'));
+                return !isHidden;
+            });
+        }
+
+        return stats;
+    }
+
     private async performCommit(triggeredBy: string): Promise<void> {
         if (this.commitInProgress) {
             if (triggeredBy === 'manual') {
@@ -244,7 +346,10 @@ export default class LocalGitPlugin extends Plugin {
 
         try {
             // Get changed files with diff stats
-            const stats: FileDiffStat[] = await this.gitEngine.getDiffStats();
+            let stats: FileDiffStat[] = await this.gitEngine.getDiffStats();
+
+            // Filter files based on settings
+            stats = await this.filterFilesBySettings(stats);
 
             if (stats.length === 0) {
                 if (triggeredBy === 'manual') {
@@ -253,21 +358,11 @@ export default class LocalGitPlugin extends Plugin {
                 return;
             }
 
-            // Build commit message
-            const message = buildCommitMessage({
-                files: stats,
-                maxFiles: this.settings.maxFilesInCommitMessage,
-            });
-
-            // Stage and commit
-            await this.gitEngine.stageAndCommit(message);
-
-            if (triggeredBy === 'manual') {
-                new Notice(`Committed ${stats.length.toString()} file(s)`);
-            }
-
-            if (this.settings.debugLogging) {
-                console.log(`[Local Git] Commit (${triggeredBy}): ${message}`);
+            // Route to appropriate commit strategy
+            if (this.settings.commitMode === 'individual') {
+                await this.performIndividualCommits(stats, triggeredBy);
+            } else {
+                await this.performBatchCommit(stats, triggeredBy);
             }
         } catch (error) {
             console.error('[Local Git] Commit failed:', error);
@@ -282,6 +377,109 @@ export default class LocalGitPlugin extends Plugin {
             }
         } finally {
             this.commitInProgress = false;
+        }
+    }
+
+    private async performBatchCommit(stats: FileDiffStat[], triggeredBy: string): Promise<void> {
+        if (!this.gitEngine) return;
+
+        // Handle hidden files separately if needed
+        if (this.settings.hiddenFilesHandling === 'separate') {
+            const { hidden, regular } = categorizeFiles(stats);
+
+            // Commit regular files first
+            if (regular.length > 0) {
+                const message = buildCommitMessage({
+                    files: regular,
+                    maxFiles: this.settings.maxFilesInCommitMessage,
+                });
+                await this.gitEngine.stageAndCommitFiles(
+                    regular.map((f) => f.path),
+                    message
+                );
+            }
+
+            // Commit hidden files separately
+            if (hidden.length > 0) {
+                const message = buildHiddenFilesCommitMessage(hidden);
+                await this.gitEngine.stageAndCommitFiles(
+                    hidden.map((f) => f.path),
+                    message
+                );
+            }
+
+            if (triggeredBy === 'manual') {
+                const commitCount = (regular.length > 0 ? 1 : 0) + (hidden.length > 0 ? 1 : 0);
+                new Notice(
+                    `Committed ${stats.length.toString()} file(s) in ${commitCount.toString()} commit(s)`
+                );
+            }
+        } else {
+            // Group all files together (current behavior)
+            const message = buildCommitMessage({
+                files: stats,
+                maxFiles: this.settings.maxFilesInCommitMessage,
+            });
+
+            await this.gitEngine.stageAndCommit(message);
+
+            if (triggeredBy === 'manual') {
+                new Notice(`Committed ${stats.length.toString()} file(s)`);
+            }
+        }
+
+        if (this.settings.debugLogging) {
+            console.log(`[Local Git] Batch commit (${triggeredBy}) completed`);
+        }
+    }
+
+    private async performIndividualCommits(
+        stats: FileDiffStat[],
+        triggeredBy: string
+    ): Promise<void> {
+        if (!this.gitEngine) return;
+
+        let committedCount = 0;
+
+        // Handle hidden files separately if needed
+        if (this.settings.hiddenFilesHandling === 'separate') {
+            const { hidden, regular } = categorizeFiles(stats);
+
+            // Commit regular files individually
+            for (const stat of regular) {
+                const message = buildSingleFileCommitMessage(stat);
+                await this.gitEngine.stageAndCommitFiles([stat.path], message);
+                committedCount++;
+            }
+
+            // Commit all hidden files in one commit
+            if (hidden.length > 0) {
+                const message = buildHiddenFilesCommitMessage(hidden);
+                await this.gitEngine.stageAndCommitFiles(
+                    hidden.map((f) => f.path),
+                    message
+                );
+                committedCount++;
+            }
+        } else {
+            // Commit each file individually
+            for (const stat of stats) {
+                const message = buildSingleFileCommitMessage(stat);
+                await this.gitEngine.stageAndCommitFiles([stat.path], message);
+                committedCount++;
+            }
+        }
+
+        if (triggeredBy === 'manual') {
+            new Notice(
+                `Created ${committedCount.toString()} commit(s) for ${stats.length.toString()} file(s)`
+            );
+        }
+
+        if (this.settings.debugLogging) {
+            console.log(
+                `[Local Git] Individual commits (${triggeredBy}): ${committedCount.toString()} commits`
+            );
         }
     }
 
@@ -474,6 +672,43 @@ class LocalGitSettingTab extends PluginSettingTab {
                     })
             );
 
+        // Commit Strategy
+        containerEl.createEl('h2', { text: 'Commit Strategy' });
+
+        new Setting(containerEl)
+            .setName('Commit mode')
+            .setDesc('Choose how to create commits for changed files')
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption('batch', 'Batch all files in one commit')
+                    .addOption('individual', 'Individual commits per file')
+                    .setValue(this.plugin.settings.commitMode)
+                    .onChange(async (value) => {
+                        this.plugin.settings.commitMode = value as 'batch' | 'individual';
+                        await this.plugin.saveSettingsAsync();
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Hidden files handling')
+            .setDesc('How to handle files starting with a dot (.)')
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption('group', 'Group with regular files (no special treatment)')
+                    .addOption('separate', 'Commit separately from regular files')
+                    .addOption('never', 'Never commit hidden files')
+                    .addOption('gitignore-only', 'Respect .gitignore only')
+                    .setValue(this.plugin.settings.hiddenFilesHandling)
+                    .onChange(async (value) => {
+                        this.plugin.settings.hiddenFilesHandling = value as
+                            | 'group'
+                            | 'separate'
+                            | 'never'
+                            | 'gitignore-only';
+                        await this.plugin.saveSettingsAsync();
+                    })
+            );
+
         // User Interface
         containerEl.createEl('h2', { text: 'User Interface' });
 
@@ -502,7 +737,9 @@ class LocalGitSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Additional gitignore patterns')
-            .setDesc('Additional patterns to ignore (one per line, will be added to .gitignore)')
+            .setDesc(
+                'Additional patterns to ignore (one per line). These will be written to .gitignore in a managed section.'
+            )
             .addTextArea((text) =>
                 text
                     .setValue(this.plugin.settings.additionalGitignorePatterns)

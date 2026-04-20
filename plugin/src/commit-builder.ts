@@ -36,10 +36,51 @@ export function buildCommitMessage(options: CommitMessageOptions): string {
     return `chore: update ${fileList}`;
 }
 
-function hasNetDeletions(stat: FileDiffStat): boolean {
+export function hasNetDeletions(stat: FileDiffStat): boolean {
     return stat.netChange < 0;
 }
 
-function formatFileName(stat: FileDiffStat): string {
+export function formatFileName(stat: FileDiffStat): string {
     return hasNetDeletions(stat) ? `${stat.path} [DELETES]` : stat.path;
+}
+
+export interface FileGroup {
+    hidden: FileDiffStat[];
+    regular: FileDiffStat[];
+}
+
+export function categorizeFiles(files: FileDiffStat[]): FileGroup {
+    const hidden: FileDiffStat[] = [];
+    const regular: FileDiffStat[] = [];
+
+    for (const file of files) {
+        // Check if any part of the path is hidden (starts with .)
+        const pathParts = file.path.split('/');
+        const isHidden = pathParts.some((part) => part.startsWith('.'));
+
+        if (isHidden) {
+            hidden.push(file);
+        } else {
+            regular.push(file);
+        }
+    }
+
+    return { hidden, regular };
+}
+
+export function buildSingleFileCommitMessage(stat: FileDiffStat): string {
+    const fileName = formatFileName(stat);
+    return `chore: update ${fileName}`;
+}
+
+export function buildHiddenFilesCommitMessage(files: FileDiffStat[]): string {
+    if (files.length === 0) {
+        return 'chore: update hidden files';
+    }
+
+    const sortedFiles = [...files].sort((a, b) => a.path.localeCompare(b.path));
+    const formattedFiles = sortedFiles.map((stat) => formatFileName(stat));
+
+    const fileList = formattedFiles.join(', ');
+    return `chore: update hidden files (${fileList})`;
 }
